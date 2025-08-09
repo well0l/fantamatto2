@@ -217,3 +217,75 @@ class DatabaseManager:
     def get_matto_gallery(self, matto_id):
         with self.lock:
             return self.cursor.execute(
+                "SELECT s.id, s.file_id, s.media_type, s.timestamp, u.username, u.first_name, t.username AS target_username, t.first_name AS target_first_name "
+                "FROM sightings s "
+                "JOIN users u ON s.user_chat_id = u.chat_id "
+                "LEFT JOIN users t ON s.target_chat_id = t.chat_id "
+                "WHERE matto_id = ? ORDER BY s.timestamp DESC;",
+                (matto_id,)
+            ).fetchall()
+
+    def get_user_gallery(self, chat_id):
+        with self.lock:
+            # Ottieni tutte le segnalazioni dell'utente
+            sightings = self.cursor.execute(
+                "SELECT s.id, m.name, s.points_awarded, s.file_id, s.media_type, s.timestamp, t.username AS target_username, t.first_name AS target_first_name "
+                "FROM sightings s "
+                "JOIN matti m ON s.matto_id = m.id "
+                "LEFT JOIN users t ON s.target_chat_id = t.chat_id "
+                "WHERE s.user_chat_id = ? ORDER BY s.timestamp DESC;",
+                (chat_id,)
+            ).fetchall()
+            
+            # Raggruppa per matto
+            matto_stats = defaultdict(lambda: {"count": 0, "points": 0, "photos": []})
+            for s in sightings:
+                name = s["name"]
+                matto_stats[name]["count"] += 1
+                matto_stats[name]["points"] += s["points_awarded"]
+                matto_stats[name]["photos"].append({
+                    "file_id": s["file_id"],
+                    "media_type": s["media_type"] if s["media_type"] else "photo",
+                    "sighting_id": s["id"],
+                    "target_username": s["target_username"],
+                    "target_first_name": s["target_first_name"]
+                })
+            
+            return matto_stats
+
+    def delete_sighting(self, sighting_id):
+        with self.lock:
+            # Ottieni i dettagli della segnalazione
+            sighting = self.cursor.execute(
+                "SELECT user_chat_id, points_awarded, target_chat_id FROM sightings WHERE id = ?;",
+                (sighting_id,)
+            ).fetchone()
+            
+            if not sighting:
+                return False
+            
+            # Elimina la segnalazione
+            self.cursor.execute("DELETE FROM sightings WHERE id = ?;", (sighting_id,))
+            
+            # Ripristina punti del segnalatore
+            self.cursor.execute(
+                "UPDATE users SET total_points = total_points - ? WHERE chat_id = ?;",
+                (sighting["points_awarded"], sighting["user_chat_id"])
+            )
+            
+            # Ripristina punti del target (se c'era un'arma)
+            if sighting["target_chat_id"]:
+                self.cursor.execute(
+                    "UPDATE users SET total_points = total_points + ? WHERE chat_id = ?;",
+                    (abs(sighting["points_awarded"]), sighting["target_chat_id"])
+                )
+            
+            self.db.commit()
+            return True
+
+    def close(self):
+        """Chiude la connessione al database"""
+        self.db.close()
+
+# Istanza globale del database
+db_manager = DatabaseManager()
