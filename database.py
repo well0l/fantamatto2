@@ -60,6 +60,21 @@ class DatabaseManager:
                     );
                 """)
                 
+                # Tabella per i suggerimenti di matti
+                self.cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS matto_suggestions (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_chat_id INTEGER NOT NULL,
+                        suggested_name TEXT NOT NULL,
+                        suggested_points INTEGER NOT NULL,
+                        status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+                        admin_notes TEXT DEFAULT NULL,
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                        reviewed_at TEXT DEFAULT NULL,
+                        FOREIGN KEY (user_chat_id) REFERENCES users(chat_id) ON DELETE CASCADE
+                    );
+                """)
+                
                 self.db.commit()
                 logger.info("Tabelle del database create con successo")
         except Exception as e:
@@ -87,6 +102,25 @@ class DatabaseManager:
                 self.cursor.execute("ALTER TABLE sightings ADD COLUMN media_type TEXT DEFAULT 'photo' CHECK (media_type IN ('photo', 'video'));")
                 self.db.commit()
                 logger.info("Database aggiornato con la colonna media_type")
+            
+            # Verifica se la tabella matto_suggestions esiste già
+            self.cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='matto_suggestions';")
+            if not self.cursor.fetchone():
+                self.cursor.execute("""
+                    CREATE TABLE matto_suggestions (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_chat_id INTEGER NOT NULL,
+                        suggested_name TEXT NOT NULL,
+                        suggested_points INTEGER NOT NULL,
+                        status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+                        admin_notes TEXT DEFAULT NULL,
+                        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                        reviewed_at TEXT DEFAULT NULL,
+                        FOREIGN KEY (user_chat_id) REFERENCES users(chat_id) ON DELETE CASCADE
+                    );
+                """)
+                self.db.commit()
+                logger.info("Database aggiornato con la tabella matto_suggestions")
 
     # ————— METODI USERS —————
     def register_user(self, chat_id, username, first_name):
@@ -282,6 +316,92 @@ class DatabaseManager:
             
             self.db.commit()
             return True
+
+    # ————— METODI SUGGESTIONS —————
+    def add_suggestion(self, user_chat_id, name, points):
+        """Aggiunge un suggerimento per un nuovo matto"""
+        with self.lock:
+            self.cursor.execute(
+                "INSERT INTO matto_suggestions (user_chat_id, suggested_name, suggested_points) VALUES (?, ?, ?);",
+                (user_chat_id, name, points)
+            )
+            self.db.commit()
+            return self.cursor.lastrowid
+
+    def get_pending_suggestions(self):
+        """Ottiene tutti i suggerimenti in attesa di approvazione"""
+        with self.lock:
+            return self.cursor.execute(
+                """
+                SELECT s.id, s.suggested_name, s.suggested_points, s.created_at,
+                       u.username, u.first_name, u.chat_id as user_chat_id
+                FROM matto_suggestions s
+                JOIN users u ON s.user_chat_id = u.chat_id
+                WHERE s.status = 'pending'
+                ORDER BY s.created_at ASC;
+                """
+            ).fetchall()
+
+    def approve_suggestion(self, suggestion_id, admin_notes=None):
+        """Approva un suggerimento e aggiunge il matto"""
+        with self.lock:
+            # Ottieni i dettagli del suggerimento
+            suggestion = self.cursor.execute(
+                "SELECT suggested_name, suggested_points FROM matto_suggestions WHERE id = ? AND status = 'pending';",
+                (suggestion_id,)
+            ).fetchone()
+            
+            if not suggestion:
+                return False
+            
+            # Aggiungi il matto
+            self.cursor.execute(
+                "INSERT OR REPLACE INTO matti (name, points) VALUES (?, ?);",
+                (suggestion["suggested_name"], suggestion["suggested_points"])
+            )
+            
+            # Aggiorna lo stato del suggerimento
+            now = datetime.now(timezone.utc).isoformat()
+            self.cursor.execute(
+                "UPDATE matto_suggestions SET status = 'approved', admin_notes = ?, reviewed_at = ? WHERE id = ?;",
+                (admin_notes, now, suggestion_id)
+            )
+            
+            self.db.commit()
+            return True
+
+    def reject_suggestion(self, suggestion_id, admin_notes=None):
+        """Rifiuta un suggerimento"""
+        with self.lock:
+            now = datetime.now(timezone.utc).isoformat()
+            self.cursor.execute(
+                "UPDATE matto_suggestions SET status = 'rejected', admin_notes = ?, reviewed_at = ? WHERE id = ?;",
+                (admin_notes, now, suggestion_id)
+            )
+            self.db.commit()
+            return True
+
+    def get_suggestion_by_id(self, suggestion_id):
+        """Ottiene un suggerimento specifico"""
+        with self.lock:
+            return self.cursor.execute(
+                """
+                SELECT s.id, s.suggested_name, s.suggested_points, s.status, s.admin_notes, s.created_at,
+                       u.username, u.first_name, u.chat_id as user_chat_id
+                FROM matto_suggestions s
+                JOIN users u ON s.user_chat_id = u.chat_id
+                WHERE s.id = ?;
+                """,
+                (suggestion_id,)
+            ).fetchone()
+
+    def get_user_suggestions(self, user_chat_id):
+        """Ottiene tutti i suggerimenti di un utente"""
+        with self.lock:
+            return self.cursor.execute(
+                "SELECT id, suggested_name, suggested_points, status, admin_notes, created_at FROM matto_suggestions WHERE user_chat_id = ? ORDER BY created_at DESC;",
+                (user_chat_id,)
+            ).fetchall()
 
     def close(self):
         """Chiude la connessione al database"""
