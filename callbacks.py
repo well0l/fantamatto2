@@ -432,3 +432,96 @@ def callback_matto_mode(bot, call: types.CallbackQuery):
     
     state_manager.remove_pending_gallery_matto(chat_id)
     bot.answer_callback_query(call.id)
+
+# ————— CALLBACK SUGGESTION REVIEW —————
+def callback_approve_suggestion(bot, call: types.CallbackQuery):
+    """Gestisce l'approvazione di un suggerimento"""
+    if call.from_user.id != ADMIN_CHAT_ID:
+        bot.answer_callback_query(call.id, "❌ Solo l'admin può approvare suggerimenti!", show_alert=True)
+        return
+    
+    parts = call.data.split("|", 1)
+    if len(parts) < 2 or not parts[1].isdigit():
+        bot.answer_callback_query(call.id, "ID non valido!", show_alert=True)
+        return
+    
+    suggestion_id = int(parts[1])
+    
+    # Controlla se è approvazione silenziosa
+    if call.data.startswith("approve_suggestion_silent|"):
+        success = db_manager.approve_suggestion(suggestion_id)
+        if success:
+            suggestion = db_manager.get_suggestion_by_id(suggestion_id)
+            bot.answer_callback_query(call.id, f"✅ {suggestion['suggested_name']} approvato!", show_alert=True)
+            bot.edit_message_text(
+                f"✅ Suggerimento approvato: *{suggestion['suggested_name']}*",
+                call.message.chat.id,
+                call.message.message_id,
+                parse_mode="Markdown"
+            )
+            
+            # Notifica all'utente senza note
+            user_text = (
+                f"🎉 *Suggerimento approvato!*\n\n"
+                f"📝 Il tuo matto *{suggestion['suggested_name']}* ({suggestion['suggested_points']} punti) è stato aggiunto al gioco!"
+            )
+            try:
+                bot.send_message(suggestion['user_chat_id'], user_text, parse_mode="Markdown")
+            except Exception as e:
+                logger.error(f"Errore notifica utente approvazione: {str(e)}")
+        else:
+            bot.answer_callback_query(call.id, "❌ Errore durante l'approvazione!", show_alert=True)
+    else:
+        # Approvazione con note
+        state_manager.set_pending_suggestion_review(call.message.chat.id, suggestion_id, 'approve')
+        bot.send_message(
+            call.message.chat.id,
+            "✅ Inserisci delle note per l'approvazione (opzionale, invia solo un punto '.' se non vuoi note):"
+        )
+        bot.answer_callback_query(call.id)
+
+def callback_reject_suggestion(bot, call: types.CallbackQuery):
+    """Gestisce il rifiuto di un suggerimento"""
+    if call.from_user.id != ADMIN_CHAT_ID:
+        bot.answer_callback_query(call.id, "❌ Solo l'admin può rifiutare suggerimenti!", show_alert=True)
+        return
+    
+    parts = call.data.split("|", 1)
+    if len(parts) < 2 or not parts[1].isdigit():
+        bot.answer_callback_query(call.id, "ID non valido!", show_alert=True)
+        return
+    
+    suggestion_id = int(parts[1])
+    
+    # Controlla se è rifiuto silenzioso
+    if call.data.startswith("reject_suggestion_silent|"):
+        success = db_manager.reject_suggestion(suggestion_id)
+        if success:
+            suggestion = db_manager.get_suggestion_by_id(suggestion_id)
+            bot.answer_callback_query(call.id, f"❌ {suggestion['suggested_name']} rifiutato!", show_alert=True)
+            bot.edit_message_text(
+                f"❌ Suggerimento rifiutato: *{suggestion['suggested_name']}*",
+                call.message.chat.id,
+                call.message.message_id,
+                parse_mode="Markdown"
+            )
+            
+            # Notifica all'utente senza note
+            user_text = (
+                f"😔 *Suggerimento rifiutato*\n\n"
+                f"📝 Il tuo matto *{suggestion['suggested_name']}* non è stato approvato."
+            )
+            try:
+                bot.send_message(suggestion['user_chat_id'], user_text, parse_mode="Markdown")
+            except Exception as e:
+                logger.error(f"Errore notifica utente rifiuto: {str(e)}")
+        else:
+            bot.answer_callback_query(call.id, "❌ Errore durante il rifiuto!", show_alert=True)
+    else:
+        # Rifiuto con note
+        state_manager.set_pending_suggestion_review(call.message.chat.id, suggestion_id, 'reject')
+        bot.send_message(
+            call.message.chat.id,
+            "❌ Inserisci il motivo del rifiuto:"
+        )
+        bot.answer_callback_query(call.id)
