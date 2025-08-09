@@ -4,6 +4,7 @@
 import tempfile
 import os
 import logging
+import uuid  # Aggiunto per generare ID unici per i suggerimenti
 from telebot import types
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from telebot.apihelper import ApiException
@@ -14,7 +15,7 @@ from states import state_manager
 from utils import (
     parse_matti_file_content, create_temp_file_from_content, 
     cleanup_temp_file, format_username, format_user_info,
-    create_leaderboard_text, save_text_to_temp_file, escape_markdown_v1
+    create_leaderboard_text, save_text_to_temp_file
 )
 
 # ————— HANDLER COMANDI BASE —————
@@ -54,6 +55,8 @@ def handle_help(bot, msg: types.Message):
 /galleria_utente - Visualizza le segnalazioni di un utente
 /galleria_matto - Visualizza tutte le segnalazioni di un matto
 /me - Mostra la tua posizione in classifica
+/suggest - Suggerisci un nuovo matto
+/suggest_file - Suggerisci più matti tramite un file .txt
 
 """
     bot.send_message(msg.chat.id, help_text, parse_mode="Markdown")
@@ -92,32 +95,20 @@ def handle_me(bot, msg: types.Message):
 def handle_leaderboard(bot, msg: types.Message):
     top = db_manager.get_leaderboard(10)
     text = create_leaderboard_text(top, "🏆 *Classifica – Top10*", True, 10)
-    bot.send_message(msg.chat.id, text, parse_mode="MarkdownV2")
+    bot.send_message(msg.chat.id, text, parse_mode="Markdown")
 
 def handle_full_leaderboard(bot, msg: types.Message):
     all_users = db_manager.get_leaderboard()
-    
-    # Crea il testo della classifica senza markdown problematico
-    if not all_users:
-        text = "🏆 Classifica Completa\nLa classifica è vuota!"
-    else:
-        text = "🏆 Classifica Completa\n"
-        for i, row in enumerate(all_users):
-            usr = format_username(row['username'], row['first_name'], row['chat_id'])
-            pts = row['total_points']
-            text += f"🔹 {i+1}. {usr} – {pts} punti\n"
+    text = create_leaderboard_text(all_users, "🏆 *Classifica Completa*", False)
     
     # Se il messaggio è troppo lungo, invialo come file
     if len(text) > 4000:
         tmp_path = save_text_to_temp_file(text)
-        try:
-            with open(tmp_path, "rb") as f:
-                bot.send_document(msg.chat.id, f, caption="Classifica completa")
-        finally:
-            cleanup_temp_file(tmp_path)
+        with open(tmp_path, "rb") as f:
+            bot.send_document(msg.chat.id, f, caption="Classifica completa")
+        cleanup_temp_file(tmp_path)
     else:
-        # Invia senza parse_mode per evitare problemi di parsing
-        bot.send_message(msg.chat.id, text, parse_mode=None)
+        bot.send_message(msg.chat.id, text, parse_mode="Markdown")
 
 def handle_unregister(bot, msg: types.Message):
     db_manager.unregister_user(msg.chat.id)
@@ -131,18 +122,40 @@ def handle_listmatti(bot, msg: types.Message):
     if not items:
         bot.send_message(
             msg.chat.id, 
-            "📂 Lista matti vuota. L'admin può usare /upload_matti per caricarla.",
-            parse_mode=None
+            "📂 Lista matti vuota\\. L'admin può usare `/upload_matti` per caricarla\\.",
+            parse_mode="MarkdownV2"
         )
         return
     
-    text = "Lista matti disponibili:\n"
+    text = "*Lista matti disponibili:*"
     for itm in items:
-        # Escape del nome del matto per evitare problemi
-        safe_name = escape_markdown_v1(itm['name'])
-        text += f"• {safe_name} – {itm['points']} punti\n"
+        text += f"\n• {itm['name']} – *{itm['points']} punti*"
     
-    bot.send_message(msg.chat.id, text, parse_mode=None)
+    bot.send_message(msg.chat.id, text, parse_mode="Markdown")
+
+# ————— HANDLER SUGGERIMENTI UTENTE (NUOVA FUNZIONE) —————
+def handle_suggest(bot, msg: types.Message):
+    chat_id = msg.chat.id
+    if not db_manager.get_user_rank_and_points(chat_id):
+        bot.send_message(chat_id, "❌ Devi prima registrarti con /start.")
+        return
+
+    bot.send_message(chat_id, "📝 Inserisci il *nome* del matto che vuoi suggerire:", parse_mode="Markdown")
+    state_manager.set_awaiting_suggestion_name(chat_id)
+
+def handle_suggest_file(bot, msg: types.Message):
+    chat_id = msg.chat.id
+    if not db_manager.get_user_rank_and_points(chat_id):
+        bot.send_message(chat_id, "❌ Devi prima registrarti con /start.")
+        return
+
+    bot.send_message(
+        chat_id,
+        "📄 Invia un file `.txt` con i tuoi suggerimenti.\n"
+        "Ogni riga deve essere nel formato: `nome del matto,punteggio`",
+        parse_mode="Markdown"
+    )
+    state_manager.set_awaiting_suggestion_file(chat_id)
 
 # ————— HANDLER GALLERIE —————
 def handle_galleria_utente(bot, msg: types.Message):
@@ -170,8 +183,8 @@ def handle_galleria_matto(bot, msg: types.Message):
     if not items:
         bot.send_message(
             msg.chat.id, 
-            "📂 Nessun matto definito.",
-            parse_mode=None
+            "📂 Nessun matto definito\\.",
+            parse_mode="MarkdownV2"
         )
         return
     
@@ -241,10 +254,7 @@ def handle_add_matto(bot, msg: types.Message):
         _, name, points = msg.text.split(' ', 2)
         points = int(points)
         db_manager.add_matto(name, points)
-        
-        # Escape del nome per il messaggio di conferma
-        safe_name = escape_markdown_v1(name)
-        bot.send_message(msg.chat.id, f"✅ Matto aggiunto: *{safe_name}* con *{points} punti*", parse_mode="Markdown")
+        bot.send_message(msg.chat.id, f"✅ Matto aggiunto: *{name}* con *{points} punti*", parse_mode="Markdown")
     except Exception as e:
         logger.error(f"Errore aggiunta matto: {str(e)}")
         bot.send_message(msg.chat.id, "❌ Formato errato. Usa: /add_matto <nome> <punti>")
@@ -280,17 +290,26 @@ def handle_upload_matti(bot, msg: types.Message):
     state_manager.set_admin_upload_pending(True)
     bot.send_message(
         msg.chat.id, 
-        "📄 Invia ora il file .txt con la lista (ogni riga: nome, punti).",
-        parse_mode=None
+        "📄 Invia ora il file `.txt` con la lista \\(ogni riga: `nome, punti`\\)\\.",
+        parse_mode="MarkdownV2"
     )
 
+# ————— HANDLER DOCUMENTI (MODIFICATO) —————
 def handle_document(bot, msg: types.Message):
-    if msg.chat.id != ADMIN_CHAT_ID or not state_manager.is_admin_upload_pending():
+    chat_id = msg.chat.id
+    
+    # Logica per i file di suggerimento utente
+    if state_manager.is_awaiting_suggestion_file(chat_id):
+        handle_suggestion_document(bot, msg)
+        return
+    
+    # Logica originale per l'upload admin
+    if chat_id != ADMIN_CHAT_ID or not state_manager.is_admin_upload_pending():
         return
     
     doc = msg.document
     if not doc.file_name.lower().endswith(".txt"):
-        bot.send_message(msg.chat.id, "❌ Per favore invia un file di testo .txt.", parse_mode=None)
+        bot.send_message(msg.chat.id, "❌ Per favore invia un file di testo `.txt`.", parse_mode="Markdown")
         state_manager.set_admin_upload_pending(False)
         return
     
@@ -302,13 +321,67 @@ def handle_document(bot, msg: types.Message):
         count = db_manager.load_matti_from_data(matti_data)
         
         state_manager.set_admin_upload_pending(False)
-        bot.send_message(msg.chat.id, f"✅ Caricati {count} matti nel database (aggiunti/aggiornati senza sovrascrivere).")
+        bot.send_message(msg.chat.id, f"✅ Caricati {count} matti nel database.")
         
     except Exception as e:
         logger.error(f"Errore caricamento matti: {str(e)}")
         bot.send_message(msg.chat.id, f"❌ Errore durante il caricamento: {str(e)}")
         state_manager.set_admin_upload_pending(False)
 
+# ————— NUOVO HANDLER PER FILE SUGGERIMENTI —————
+def handle_suggestion_document(bot, msg: types.Message):
+    chat_id = msg.chat.id
+    state_manager.clear_suggestion_states(chat_id)
+
+    doc = msg.document
+    if not doc.file_name.lower().endswith(".txt"):
+        bot.send_message(chat_id, "❌ File non valido. Invia un file `.txt`.")
+        return
+
+    try:
+        file_info = bot.get_file(doc.file_id)
+        content = bot.download_file(file_info.file_path).decode("utf-8")
+        matti_data = parse_matti_file_content(content)
+        
+        if not matti_data:
+            bot.send_message(chat_id, "⚠️ Il file è vuoto o formattato male. Nessun suggerimento inviato.")
+            return
+
+        user_info = format_user_info(msg.from_user.username, msg.from_user.first_name)
+        suggestions_sent = 0
+
+        for name, points in matti_data:
+            suggestion_id = str(uuid.uuid4())
+            suggestion_data = {
+                'suggester_id': chat_id, 'suggester_info': user_info,
+                'name': name, 'points': points
+            }
+            state_manager.add_pending_suggestion(suggestion_id, suggestion_data)
+
+            text_to_admin = (f"🔔 *Nuovo suggerimento Matto (da file)*\n\n"
+                             f"Da: {user_info}\n"
+                             f"Nome: *{name}*\n"
+                             f"Punti: *{points}*")
+            
+            markup = InlineKeyboardMarkup()
+            markup.row(
+                InlineKeyboardButton("✅ Approva", callback_data=f"review_suggestion|approve|{suggestion_id}"),
+                InlineKeyboardButton("❌ Rifiuta", callback_data=f"review_suggestion|reject|{suggestion_id}")
+            )
+
+            try:
+                bot.send_message(ADMIN_CHAT_ID, text_to_admin, reply_markup=markup, parse_mode="Markdown")
+                suggestions_sent += 1
+            except Exception as e:
+                logger.error(f"Impossibile inviare suggerimento da file all'admin: {e}")
+
+        bot.send_message(chat_id, f"✅ Inviati {suggestions_sent} suggerimenti all'admin per la revisione.")
+
+    except Exception as e:
+        logger.error(f"Errore elaborazione file suggerimenti: {str(e)}")
+        bot.send_message(chat_id, "❌ Si è verificato un errore durante la lettura del file.")
+
+# ————— HANDLER DI STATO —————
 def handle_modifica_punti(bot, msg: types.Message):
     admin_id = msg.chat.id
     target_id = state_manager.get_awaiting_point_update(admin_id)
@@ -331,10 +404,60 @@ def handle_modifica_punti(bot, msg: types.Message):
     
     if user:
         nome = user["first_name"] or user["username"] or str(target_id)
-        safe_nome = escape_markdown_v1(nome)
-        bot.send_message(admin_id, f"✅ Il punteggio di *{safe_nome}* è stato aggiornato a *{nuovo_punteggio}*.", parse_mode="Markdown")
+        bot.send_message(admin_id, f"✅ Il punteggio di *{nome}* è stato aggiornato a *{nuovo_punteggio}*.", parse_mode="Markdown")
 
-# ————— HANDLER REPORT E FOTO/VIDEO —————
+# ————— NUOVI HANDLER CONVERSAZIONALI PER SUGGERIMENTI —————
+def handle_suggestion_name(bot, msg: types.Message):
+    chat_id = msg.chat.id
+    matto_name = msg.text.strip()
+
+    if not matto_name:
+        bot.send_message(chat_id, "❌ Il nome non può essere vuoto. Riprova.")
+        return
+    
+    bot.send_message(chat_id, f"👍 Nome: *{matto_name}*.\nOra inserisci il *punteggio* (es. 50, o -20 per un'arma):", parse_mode="Markdown")
+    state_manager.set_awaiting_suggestion_points(chat_id, matto_name)
+
+def handle_suggestion_points(bot, msg: types.Message):
+    chat_id = msg.chat.id
+    
+    try:
+        points = int(msg.text.strip())
+    except ValueError:
+        bot.send_message(chat_id, "❌ Punteggio non valido. Inserisci un numero intero.")
+        return
+
+    matto_name = state_manager.get_pending_suggestion_name(chat_id)
+    state_manager.clear_suggestion_states(chat_id) 
+
+    user_info = format_user_info(msg.from_user.username, msg.from_user.first_name)
+    
+    suggestion_id = str(uuid.uuid4())
+    suggestion_data = {
+        'suggester_id': chat_id, 'suggester_info': user_info,
+        'name': matto_name, 'points': points
+    }
+    state_manager.add_pending_suggestion(suggestion_id, suggestion_data)
+
+    text_to_admin = (f"🔔 *Nuovo suggerimento Matto*\n\n"
+                     f"Da: {user_info} (`{chat_id}`)\n"
+                     f"Nome: *{matto_name}*\n"
+                     f"Punti: *{points}*")
+
+    markup = InlineKeyboardMarkup()
+    markup.row(
+        InlineKeyboardButton("✅ Approva", callback_data=f"review_suggestion|approve|{suggestion_id}"),
+        InlineKeyboardButton("❌ Rifiuta", callback_data=f"review_suggestion|reject|{suggestion_id}")
+    )
+
+    try:
+        bot.send_message(ADMIN_CHAT_ID, text_to_admin, reply_markup=markup, parse_mode="Markdown")
+        bot.send_message(chat_id, "✅ Suggerimento inviato all'admin per la revisione.")
+    except Exception as e:
+        bot.send_message(chat_id, "⚠️ Impossibile inviare il suggerimento. Riprova più tardi.")
+        logger.error(f"Impossibile inviare suggerimento all'admin: {e}")
+
+# ————— HANDLER REPORT E FOTO —————
 def handle_report(bot, msg: types.Message):
     chat_id = msg.chat.id
     user_data = db_manager.get_user_rank_and_points(chat_id)
@@ -347,8 +470,8 @@ def handle_report(bot, msg: types.Message):
     if not items:
         bot.send_message(
             chat_id, 
-            "📂 Nessun matto definito. L'admin può caricarli con /upload_matti.",
-            parse_mode=None
+            "📂 Nessun matto definito\\. L'admin può caricarli con `/upload_matti`\\.",
+            parse_mode="MarkdownV2"
         )
         return
     
@@ -366,34 +489,17 @@ def handle_report(bot, msg: types.Message):
     )
 
 def handle_photo(bot, msg: types.Message):
-    """Gestisce le foto per le segnalazioni"""
     chat_id = msg.chat.id
     if not state_manager.has_pending_matto(chat_id):
         return
     
-    file_id = msg.photo[-1].file_id
-    media_type = "photo"
-    process_media_sighting(bot, msg, file_id, media_type)
-
-def handle_video(bot, msg: types.Message):
-    """Gestisce i video per le segnalazioni"""
-    chat_id = msg.chat.id
-    if not state_manager.has_pending_matto(chat_id):
-        return
-    
-    file_id = msg.video.file_id
-    media_type = "video"
-    process_media_sighting(bot, msg, file_id, media_type)
-
-def process_media_sighting(bot, msg: types.Message, file_id: str, media_type: str):
-    """Processa una segnalazione con media (foto o video)"""
-    chat_id = msg.chat.id
     info = state_manager.remove_pending_matto(chat_id)
     matto_id = info["id"]
     name = info["name"]
     pts = info["points"]
     first = info["first_name"]
     uname = info["username"]
+    file_id = msg.photo[-1].file_id
     
     # Controlla se è un'arma (punti negativi)
     if pts < 0:
@@ -401,7 +507,6 @@ def process_media_sighting(bot, msg: types.Message, file_id: str, media_type: st
             "matto_id": matto_id,
             "points": pts,
             "file_id": file_id,
-            "media_type": media_type,
             "first_name": first,
             "username": uname
         })
@@ -414,7 +519,7 @@ def process_media_sighting(bot, msg: types.Message, file_id: str, media_type: st
         markup = InlineKeyboardMarkup(row_width=1)
         for user in users:
             if user['chat_id'] == chat_id:
-                continue  # Salta se stesso
+                continue
                 
             username = format_username(user['username'], user['first_name'], user['chat_id'])
             markup.add(InlineKeyboardButton(
@@ -422,7 +527,6 @@ def process_media_sighting(bot, msg: types.Message, file_id: str, media_type: st
                 callback_data=f"use_weapon|{user['chat_id']}"
             ))
         
-        media_emoji = "📹" if media_type == "video" else "📸"
         bot.send_message(
             chat_id, 
             f"💥 Hai trovato un'arma! {name} ha {pts} punti.\n"
@@ -433,16 +537,14 @@ def process_media_sighting(bot, msg: types.Message, file_id: str, media_type: st
         return
     
     # Matto normale (punti positivi)
-    db_manager.add_sighting(chat_id, matto_id, pts, file_id, media_type=media_type)
+    db_manager.add_sighting(chat_id, matto_id, pts, file_id)
     
     user_data = db_manager.get_user_rank_and_points(chat_id)
     total_pts = user_data["total_points"] if user_data else 0
     
-    # Prepara i testi senza formattazione Markdown
     user_info = format_user_info(uname, first)
-    media_emoji = "📹" if media_type == "video" else "📸"
     text = (
-        f"{media_emoji} {user_info} ha trovato il matto {name} ➕ {pts} punti\n"
+        f"📸 {user_info} ha trovato il matto {name} ➕ {pts} punti\n"
         f"🏅 Ora ha {total_pts} punti."
     )
     
@@ -451,28 +553,20 @@ def process_media_sighting(bot, msg: types.Message, file_id: str, media_type: st
         f"Matto: {name} ({pts} punti)"
     )
     
-    # Invia a tutti gli utenti registrati
     sent = 0
     registered_ids = db_manager.get_registered_chat_ids()
 
     for cid in registered_ids:
         try:
             bot.send_message(cid, text, parse_mode=None)
-            
-            # Invia il media appropriato
-            if media_type == "video":
-                bot.send_video(cid, video=file_id, caption=photo_caption, parse_mode=None)
-            else:
-                bot.send_photo(cid, photo=file_id, caption=photo_caption, parse_mode=None)
+            bot.send_photo(cid, photo=file_id, caption=photo_caption, parse_mode=None)
             sent += 1
-
         except ApiException as e:
             error_msg = str(e).lower()
             if any(kw in error_msg for kw in ("blocked", "not found", "deactivated")):
                 db_manager.unregister_user(cid)
             else:
                 logger.error(f"Errore invio a {cid}: {error_msg}")
-
         except Exception as e:
             logger.error(f"Errore generico invio a {cid}: {str(e)}")
 
