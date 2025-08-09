@@ -130,6 +130,14 @@ def create_leaderboard_text(users, title="🏆 Classifica", show_medals=True, li
     
     return text
 
+def get_media_emoji(media_type):
+    """Restituisce l'emoji appropriato per il tipo di media"""
+    return "📹" if media_type == "video" else "📸"
+
+def format_media_type_text(media_type):
+    """Restituisce il testo descrittivo per il tipo di media"""
+    return "video" if media_type == "video" else "foto"
+
 def save_text_to_temp_file(text, suffix=".txt"):
     """Salva del testo in un file temporaneo e restituisce il path"""
     with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=suffix, encoding="utf-8") as tmp:
