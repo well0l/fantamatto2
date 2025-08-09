@@ -43,7 +43,7 @@ def callback_matto(bot, call: types.CallbackQuery):
     if pts < 0:
         bot.send_message(
             chat_id, 
-            f"Hai scelto un'arma: {name} ({pts} punti).\nAdesso inviami la foto.",
+            f"Hai scelto un'arma: {name} ({pts} punti).\nAdesso inviami la foto o il video.",
             parse_mode=None
         )
     else:
@@ -51,7 +51,7 @@ def callback_matto(bot, call: types.CallbackQuery):
         escaped_name = escape_markdown(name)
         bot.send_message(
             chat_id, 
-            f"Hai scelto *{escaped_name}* \\(*{pts} punti*\\)\\.\nAdesso inviami la *foto*\\.",
+            f"Hai scelto *{escaped_name}* \\(*{pts} punti*\\)\\.\nAdesso inviami la *foto o il video*\\.",
             parse_mode="MarkdownV2"
         )
 
@@ -100,7 +100,7 @@ def callback_select_user(bot, call: types.CallbackQuery):
     markup = InlineKeyboardMarkup()
     markup.row(
         InlineKeyboardButton("Solo testo", callback_data="gallery_mode|text"),
-        InlineKeyboardButton("Con foto", callback_data="gallery_mode|photos")
+        InlineKeyboardButton("Con media", callback_data="gallery_mode|photos")
     )
     
     bot.send_message(
@@ -127,7 +127,7 @@ def callback_select_matto(bot, call: types.CallbackQuery):
     markup = InlineKeyboardMarkup()
     markup.row(
         InlineKeyboardButton("Solo testo", callback_data="matto_mode|text"),
-        InlineKeyboardButton("Con foto", callback_data="matto_mode|photos")
+        InlineKeyboardButton("Con media", callback_data="matto_mode|photos")
     )
     
     bot.send_message(
@@ -203,13 +203,21 @@ def callback_manage_user(bot, call: types.CallbackQuery):
                 ))
                 
                 try:
-                    bot.send_photo(
-                        chat_id, 
-                        photo=photo["file_id"],
-                        reply_markup=markup
-                    )
+                    media_type = photo.get("media_type", "photo")
+                    if media_type == "video":
+                        bot.send_video(
+                            chat_id, 
+                            video=photo["file_id"],
+                            reply_markup=markup
+                        )
+                    else:
+                        bot.send_photo(
+                            chat_id, 
+                            photo=photo["file_id"],
+                            reply_markup=markup
+                        )
                 except Exception as e:
-                    logger.error(f"Errore invio foto: {str(e)}")
+                    logger.error(f"Errore invio media: {str(e)}")
     
     bot.answer_callback_query(call.id)
 
@@ -252,12 +260,14 @@ def callback_use_weapon(bot, call: types.CallbackQuery):
     weapon_info = state_manager.remove_pending_weapon_target(chat_id)
     
     # Aggiungi la segnalazione dell'arma
+    media_type = weapon_info.get('media_type', 'photo')
     db_manager.add_sighting(
         chat_id, 
         weapon_info['matto_id'], 
         weapon_info['points'],
         weapon_info['file_id'],
-        target_chat_id
+        target_chat_id,
+        media_type
     )
     
     # Ottieni i nomi per la notifica
@@ -280,7 +290,11 @@ def callback_use_weapon(bot, call: types.CallbackQuery):
     for cid in db_manager.get_registered_chat_ids():
         try:
             bot.send_message(cid, text, parse_mode="Markdown")
-            bot.send_photo(cid, photo=weapon_info['file_id'])
+            # Invia il media appropriato
+            if media_type == "video":
+                bot.send_video(cid, video=weapon_info['file_id'])
+            else:
+                bot.send_photo(cid, photo=weapon_info['file_id'])
         except Exception:
             continue
     
@@ -317,28 +331,36 @@ def callback_gallery_mode(bot, call: types.CallbackQuery):
         bot.send_message(chat_id, text, parse_mode="Markdown")
     
     elif mode == "photos":
-        # Visualizzazione con foto
+        # Visualizzazione con media (foto e video)
         bot.send_message(chat_id, f"📸 *Galleria di {username}:*", parse_mode="Markdown")
         
         for matto, stats in matto_stats.items():
             text = f"*{matto}*: {stats['count']} segnalazioni, {stats['points']} punti"
             bot.send_message(chat_id, text, parse_mode="Markdown")
             
-            for idx, photo in enumerate(stats["photos"], 1):
+            for idx, media in enumerate(stats["photos"], 1):
                 caption = f"Segnalazione {idx}/{stats['count']}"
                 # Aggiungi info sull'attacco se presente
-                if photo["target_first_name"] or photo["target_username"]:
-                    target = photo["target_username"] or photo["target_first_name"]
+                if media["target_first_name"] or media["target_username"]:
+                    target = media["target_username"] or media["target_first_name"]
                     caption += f"\n💥 Usato contro: {target}"
                 
                 try:
-                    bot.send_photo(
-                        chat_id, 
-                        photo=photo["file_id"],
-                        caption=caption
-                    )
+                    media_type = media.get("media_type", "photo")
+                    if media_type == "video":
+                        bot.send_video(
+                            chat_id, 
+                            video=media["file_id"],
+                            caption=caption
+                        )
+                    else:
+                        bot.send_photo(
+                            chat_id, 
+                            photo=media["file_id"],
+                            caption=caption
+                        )
                 except Exception as e:
-                    logger.error(f"Errore invio foto: {str(e)}")
+                    logger.error(f"Errore invio media: {str(e)}")
     
     state_manager.remove_pending_gallery_user(chat_id)
     bot.answer_callback_query(call.id)
@@ -370,7 +392,8 @@ def callback_matto_mode(bot, call: types.CallbackQuery):
         
         for idx, sighting in enumerate(gallery, 1):
             username = sighting['username'] or sighting['first_name'] or "Utente sconosciuto"
-            text += f"{idx}. Segnalato da: {username}\n"
+            media_emoji = "📹" if sighting.get('media_type') == 'video' else "📸"
+            text += f"{idx}. {media_emoji} Segnalato da: {username}\n"
             if sighting['target_username'] or sighting['target_first_name']:
                 target = sighting['target_username'] or sighting['target_first_name']
                 text += f"   💥 Usato contro: {target}\n"
@@ -378,25 +401,34 @@ def callback_matto_mode(bot, call: types.CallbackQuery):
         bot.send_message(chat_id, text, parse_mode="Markdown")
     
     elif mode == "photos":
-        # Visualizzazione con foto
+        # Visualizzazione con media
         bot.send_message(chat_id, f"📸 *Galleria di {matto_name}:*\nTotale: {len(gallery)} segnalazioni", parse_mode="Markdown")
         
         for idx, sighting in enumerate(gallery, 1):
             username = sighting['username'] or sighting['first_name'] or "Utente sconosciuto"
-            caption = f"Segnalazione {idx}/{len(gallery)} - Da: {username}"
+            media_type = sighting.get('media_type', 'photo')
+            media_emoji = "📹" if media_type == 'video' else "📸"
+            caption = f"{media_emoji} Segnalazione {idx}/{len(gallery)} - Da: {username}"
             
             if sighting['target_username'] or sighting['target_first_name']:
                 target = sighting['target_username'] or sighting['target_first_name']
                 caption += f"\n💥 Usato contro: {target}"
             
             try:
-                bot.send_photo(
-                    chat_id,
-                    photo=sighting['file_id'],
-                    caption=caption
-                )
+                if media_type == "video":
+                    bot.send_video(
+                        chat_id,
+                        video=sighting['file_id'],
+                        caption=caption
+                    )
+                else:
+                    bot.send_photo(
+                        chat_id,
+                        photo=sighting['file_id'],
+                        caption=caption
+                    )
             except Exception as e:
-                logger.error(f"Errore invio foto: {str(e)}")
+                logger.error(f"Errore invio media: {str(e)}")
     
     state_manager.remove_pending_gallery_matto(chat_id)
     bot.answer_callback_query(call.id)
