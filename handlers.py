@@ -14,7 +14,7 @@ from states import state_manager
 from utils import (
     parse_matti_file_content, create_temp_file_from_content, 
     cleanup_temp_file, format_username, format_user_info,
-    create_leaderboard_text, save_text_to_temp_file
+    create_leaderboard_text, save_text_to_temp_file, escape_markdown_v1
 )
 
 # ————— HANDLER COMANDI BASE —————
@@ -92,20 +92,32 @@ def handle_me(bot, msg: types.Message):
 def handle_leaderboard(bot, msg: types.Message):
     top = db_manager.get_leaderboard(10)
     text = create_leaderboard_text(top, "🏆 *Classifica – Top10*", True, 10)
-    bot.send_message(msg.chat.id, text, parse_mode="Markdown")
+    bot.send_message(msg.chat.id, text, parse_mode="MarkdownV2")
 
 def handle_full_leaderboard(bot, msg: types.Message):
     all_users = db_manager.get_leaderboard()
-    text = create_leaderboard_text(all_users, "🏆 *Classifica Completa*", False)
+    
+    # Crea il testo della classifica senza markdown problematico
+    if not all_users:
+        text = "🏆 Classifica Completa\nLa classifica è vuota!"
+    else:
+        text = "🏆 Classifica Completa\n"
+        for i, row in enumerate(all_users):
+            usr = format_username(row['username'], row['first_name'], row['chat_id'])
+            pts = row['total_points']
+            text += f"🔹 {i+1}. {usr} – {pts} punti\n"
     
     # Se il messaggio è troppo lungo, invialo come file
     if len(text) > 4000:
         tmp_path = save_text_to_temp_file(text)
-        with open(tmp_path, "rb") as f:
-            bot.send_document(msg.chat.id, f, caption="Classifica completa")
-        cleanup_temp_file(tmp_path)
+        try:
+            with open(tmp_path, "rb") as f:
+                bot.send_document(msg.chat.id, f, caption="Classifica completa")
+        finally:
+            cleanup_temp_file(tmp_path)
     else:
-        bot.send_message(msg.chat.id, text, parse_mode="Markdown")
+        # Invia senza parse_mode per evitare problemi di parsing
+        bot.send_message(msg.chat.id, text, parse_mode=None)
 
 def handle_unregister(bot, msg: types.Message):
     db_manager.unregister_user(msg.chat.id)
@@ -119,16 +131,18 @@ def handle_listmatti(bot, msg: types.Message):
     if not items:
         bot.send_message(
             msg.chat.id, 
-            "📂 Lista matti vuota\\. L'admin può usare `/upload_matti` per caricarla\\.",
-            parse_mode="MarkdownV2"
+            "📂 Lista matti vuota. L'admin può usare /upload_matti per caricarla.",
+            parse_mode=None
         )
         return
     
-    text = "*Lista matti disponibili:*"
+    text = "Lista matti disponibili:\n"
     for itm in items:
-        text += f"\n• {itm['name']} – *{itm['points']} punti*"
+        # Escape del nome del matto per evitare problemi
+        safe_name = escape_markdown_v1(itm['name'])
+        text += f"• {safe_name} – {itm['points']} punti\n"
     
-    bot.send_message(msg.chat.id, text, parse_mode="Markdown")
+    bot.send_message(msg.chat.id, text, parse_mode=None)
 
 # ————— HANDLER GALLERIE —————
 def handle_galleria_utente(bot, msg: types.Message):
@@ -156,8 +170,8 @@ def handle_galleria_matto(bot, msg: types.Message):
     if not items:
         bot.send_message(
             msg.chat.id, 
-            "📂 Nessun matto definito\\.",
-            parse_mode="MarkdownV2"
+            "📂 Nessun matto definito.",
+            parse_mode=None
         )
         return
     
@@ -227,7 +241,10 @@ def handle_add_matto(bot, msg: types.Message):
         _, name, points = msg.text.split(' ', 2)
         points = int(points)
         db_manager.add_matto(name, points)
-        bot.send_message(msg.chat.id, f"✅ Matto aggiunto: *{name}* con *{points} punti*", parse_mode="Markdown")
+        
+        # Escape del nome per il messaggio di conferma
+        safe_name = escape_markdown_v1(name)
+        bot.send_message(msg.chat.id, f"✅ Matto aggiunto: *{safe_name}* con *{points} punti*", parse_mode="Markdown")
     except Exception as e:
         logger.error(f"Errore aggiunta matto: {str(e)}")
         bot.send_message(msg.chat.id, "❌ Formato errato. Usa: /add_matto <nome> <punti>")
@@ -263,8 +280,8 @@ def handle_upload_matti(bot, msg: types.Message):
     state_manager.set_admin_upload_pending(True)
     bot.send_message(
         msg.chat.id, 
-        "📄 Invia ora il file `.txt` con la lista \\(ogni riga: `nome, punti`\\)\\.",
-        parse_mode="MarkdownV2"
+        "📄 Invia ora il file .txt con la lista (ogni riga: nome, punti).",
+        parse_mode=None
     )
 
 def handle_document(bot, msg: types.Message):
@@ -273,7 +290,7 @@ def handle_document(bot, msg: types.Message):
     
     doc = msg.document
     if not doc.file_name.lower().endswith(".txt"):
-        bot.send_message(msg.chat.id, "❌ Per favore invia un file di testo `.txt`.", parse_mode="Markdown")
+        bot.send_message(msg.chat.id, "❌ Per favore invia un file di testo .txt.", parse_mode=None)
         state_manager.set_admin_upload_pending(False)
         return
     
@@ -314,7 +331,8 @@ def handle_modifica_punti(bot, msg: types.Message):
     
     if user:
         nome = user["first_name"] or user["username"] or str(target_id)
-        bot.send_message(admin_id, f"✅ Il punteggio di *{nome}* è stato aggiornato a *{nuovo_punteggio}*.", parse_mode="Markdown")
+        safe_nome = escape_markdown_v1(nome)
+        bot.send_message(admin_id, f"✅ Il punteggio di *{safe_nome}* è stato aggiornato a *{nuovo_punteggio}*.", parse_mode="Markdown")
 
 # ————— HANDLER REPORT E FOTO —————
 def handle_report(bot, msg: types.Message):
@@ -329,8 +347,8 @@ def handle_report(bot, msg: types.Message):
     if not items:
         bot.send_message(
             chat_id, 
-            "📂 Nessun matto definito\\. L'admin può caricarli con `/upload_matti`\\.",
-            parse_mode="MarkdownV2"
+            "📂 Nessun matto definito. L'admin può caricarli con /upload_matti.",
+            parse_mode=None
         )
         return
     
