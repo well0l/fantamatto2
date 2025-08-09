@@ -19,6 +19,12 @@ class StateManager:
         self.pending_weapon_target = {}  # chat_id → {'matto_id':..., 'file_id':..., 'points':...}
         self.awaiting_point_update = {}  # admin_chat_id -> chat_id_da_modificare
         
+        # Stati per i suggerimenti
+        self.pending_suggestion_name = {}  # chat_id: True (in attesa del nome)
+        self.pending_suggestion_points = {}  # chat_id → nome_matto (in attesa dei punti)
+        self.suggestion_upload_pending = {}  # chat_id: True (in attesa del file txt)
+        self.pending_suggestion_review = {}  # admin_chat_id → suggestion_id (in attesa di note per review)
+        
         # Registra la funzione di pulizia per la chiusura
         atexit.register(self.cleanup_all_states)
     
@@ -117,6 +123,56 @@ class StateManager:
     def has_awaiting_point_update(self, admin_chat_id):
         return admin_chat_id in self.awaiting_point_update
     
+    # ————— SUGGESTION STATES —————
+    def set_pending_suggestion_name(self, chat_id):
+        """Imposta che l'utente deve inserire il nome del matto suggerito"""
+        self.pending_suggestion_name[chat_id] = True
+    
+    def has_pending_suggestion_name(self, chat_id):
+        return chat_id in self.pending_suggestion_name
+    
+    def remove_pending_suggestion_name(self, chat_id):
+        return self.pending_suggestion_name.pop(chat_id, None)
+    
+    def set_pending_suggestion_points(self, chat_id, matto_name):
+        """Imposta che l'utente deve inserire i punti per il matto suggerito"""
+        self.pending_suggestion_points[chat_id] = matto_name
+    
+    def get_pending_suggestion_points(self, chat_id):
+        return self.pending_suggestion_points.get(chat_id)
+    
+    def remove_pending_suggestion_points(self, chat_id):
+        return self.pending_suggestion_points.pop(chat_id, None)
+    
+    def has_pending_suggestion_points(self, chat_id):
+        return chat_id in self.pending_suggestion_points
+    
+    def set_suggestion_upload_pending(self, chat_id, status=True):
+        """Imposta che l'utente deve caricare un file con suggerimenti"""
+        if status:
+            self.suggestion_upload_pending[chat_id] = True
+        else:
+            self.suggestion_upload_pending.pop(chat_id, None)
+    
+    def is_suggestion_upload_pending(self, chat_id):
+        return chat_id in self.suggestion_upload_pending
+    
+    def set_pending_suggestion_review(self, admin_chat_id, suggestion_id, action):
+        """Imposta che l'admin deve inserire note per la review"""
+        self.pending_suggestion_review[admin_chat_id] = {
+            "suggestion_id": suggestion_id,
+            "action": action  # 'approve' o 'reject'
+        }
+    
+    def get_pending_suggestion_review(self, admin_chat_id):
+        return self.pending_suggestion_review.get(admin_chat_id)
+    
+    def remove_pending_suggestion_review(self, admin_chat_id):
+        return self.pending_suggestion_review.pop(admin_chat_id, None)
+    
+    def has_pending_suggestion_review(self, admin_chat_id):
+        return admin_chat_id in self.pending_suggestion_review
+    
     # ————— PULIZIA STATI —————
     def cleanup_all_states(self):
         """Pulisce tutti gli stati"""
@@ -128,6 +184,13 @@ class StateManager:
         self.pending_manage_user.clear()
         self.pending_weapon_target.clear()
         self.awaiting_point_update.clear()
+        
+        # Pulizia stati suggerimenti
+        self.pending_suggestion_name.clear()
+        self.pending_suggestion_points.clear()
+        self.suggestion_upload_pending.clear()
+        self.pending_suggestion_review.clear()
+        
         logger.info("Stati del bot puliti")
 
 # Istanza globale del gestore stati
