@@ -75,13 +75,45 @@ def cmd_remove_matto(msg: types.Message):
 def cmd_upload_matti(msg: types.Message):
     handlers.handle_upload_matti(bot, msg)
 
+@bot.message_handler(commands=["suggest"])
+def cmd_suggest(msg: types.Message):
+    handlers.handle_suggest(bot, msg)
+
+@bot.message_handler(commands=["suggest_file"])
+def cmd_suggest_file(msg: types.Message):
+    handlers.handle_suggest_file(bot, msg)
+
+@bot.message_handler(commands=["my_suggestions"])
+def cmd_my_suggestions(msg: types.Message):
+    handlers.handle_my_suggestions(bot, msg)
+
+@bot.message_handler(commands=["review_suggestions"])
+def cmd_review_suggestions(msg: types.Message):
+    handlers.handle_review_suggestions(bot, msg)
+
 @bot.message_handler(content_types=["document"])
 def handler_document(msg: types.Message):
-    handlers.handle_document(bot, msg)
+    # Gestisce sia upload admin che suggerimenti utenti
+    if msg.chat.id == ADMIN_CHAT_ID and state_manager.is_admin_upload_pending():
+        handlers.handle_document(bot, msg)
+    elif state_manager.is_suggestion_upload_pending(msg.chat.id):
+        handlers.handle_suggestion_document(bot, msg)
 
 @bot.message_handler(func=lambda msg: state_manager.has_awaiting_point_update(msg.chat.id))
 def handler_modifica_punti(msg: types.Message):
     handlers.handle_modifica_punti(bot, msg)
+
+@bot.message_handler(func=lambda msg: state_manager.has_pending_suggestion_name(msg.chat.id))
+def handler_suggestion_name(msg: types.Message):
+    handlers.handle_suggestion_name(bot, msg)
+
+@bot.message_handler(func=lambda msg: state_manager.has_pending_suggestion_points(msg.chat.id))
+def handler_suggestion_points(msg: types.Message):
+    handlers.handle_suggestion_points(bot, msg)
+
+@bot.message_handler(func=lambda msg: state_manager.has_pending_suggestion_review(msg.chat.id))
+def handler_suggestion_review_notes(msg: types.Message):
+    handlers.handle_suggestion_review_notes(bot, msg)
 
 @bot.message_handler(commands=["report"])
 def cmd_report(msg: types.Message):
@@ -136,6 +168,14 @@ def callback_gallery_mode_handler(call: types.CallbackQuery):
 @bot.callback_query_handler(func=lambda call: call.data.startswith("matto_mode|"))
 def callback_matto_mode_handler(call: types.CallbackQuery):
     callbacks.callback_matto_mode(bot, call)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("approve_suggestion"))
+def callback_approve_suggestion_handler(call: types.CallbackQuery):
+    callbacks.callback_approve_suggestion(bot, call)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("reject_suggestion"))
+def callback_reject_suggestion_handler(call: types.CallbackQuery):
+    callbacks.callback_reject_suggestion(bot, call)
 
 # ————— AVVIO BOT —————
 if __name__ == "__main__":
