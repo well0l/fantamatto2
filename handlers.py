@@ -334,7 +334,7 @@ def handle_modifica_punti(bot, msg: types.Message):
         safe_nome = escape_markdown_v1(nome)
         bot.send_message(admin_id, f"✅ Il punteggio di *{safe_nome}* è stato aggiornato a *{nuovo_punteggio}*.", parse_mode="Markdown")
 
-# ————— HANDLER REPORT E FOTO —————
+# ————— HANDLER REPORT E FOTO/VIDEO —————
 def handle_report(bot, msg: types.Message):
     chat_id = msg.chat.id
     user_data = db_manager.get_user_rank_and_points(chat_id)
@@ -366,17 +366,34 @@ def handle_report(bot, msg: types.Message):
     )
 
 def handle_photo(bot, msg: types.Message):
+    """Gestisce le foto per le segnalazioni"""
     chat_id = msg.chat.id
     if not state_manager.has_pending_matto(chat_id):
         return
     
+    file_id = msg.photo[-1].file_id
+    media_type = "photo"
+    process_media_sighting(bot, msg, file_id, media_type)
+
+def handle_video(bot, msg: types.Message):
+    """Gestisce i video per le segnalazioni"""
+    chat_id = msg.chat.id
+    if not state_manager.has_pending_matto(chat_id):
+        return
+    
+    file_id = msg.video.file_id
+    media_type = "video"
+    process_media_sighting(bot, msg, file_id, media_type)
+
+def process_media_sighting(bot, msg: types.Message, file_id: str, media_type: str):
+    """Processa una segnalazione con media (foto o video)"""
+    chat_id = msg.chat.id
     info = state_manager.remove_pending_matto(chat_id)
     matto_id = info["id"]
     name = info["name"]
     pts = info["points"]
     first = info["first_name"]
     uname = info["username"]
-    file_id = msg.photo[-1].file_id
     
     # Controlla se è un'arma (punti negativi)
     if pts < 0:
@@ -384,6 +401,7 @@ def handle_photo(bot, msg: types.Message):
             "matto_id": matto_id,
             "points": pts,
             "file_id": file_id,
+            "media_type": media_type,
             "first_name": first,
             "username": uname
         })
@@ -404,6 +422,7 @@ def handle_photo(bot, msg: types.Message):
                 callback_data=f"use_weapon|{user['chat_id']}"
             ))
         
+        media_emoji = "📹" if media_type == "video" else "📸"
         bot.send_message(
             chat_id, 
             f"💥 Hai trovato un'arma! {name} ha {pts} punti.\n"
@@ -414,15 +433,16 @@ def handle_photo(bot, msg: types.Message):
         return
     
     # Matto normale (punti positivi)
-    db_manager.add_sighting(chat_id, matto_id, pts, file_id)
+    db_manager.add_sighting(chat_id, matto_id, pts, file_id, media_type=media_type)
     
     user_data = db_manager.get_user_rank_and_points(chat_id)
     total_pts = user_data["total_points"] if user_data else 0
     
     # Prepara i testi senza formattazione Markdown
     user_info = format_user_info(uname, first)
+    media_emoji = "📹" if media_type == "video" else "📸"
     text = (
-        f"📸 {user_info} ha trovato il matto {name} ➕ {pts} punti\n"
+        f"{media_emoji} {user_info} ha trovato il matto {name} ➕ {pts} punti\n"
         f"🏅 Ora ha {total_pts} punti."
     )
     
@@ -438,7 +458,12 @@ def handle_photo(bot, msg: types.Message):
     for cid in registered_ids:
         try:
             bot.send_message(cid, text, parse_mode=None)
-            bot.send_photo(cid, photo=file_id, caption=photo_caption, parse_mode=None)
+            
+            # Invia il media appropriato
+            if media_type == "video":
+                bot.send_video(cid, video=file_id, caption=photo_caption, parse_mode=None)
+            else:
+                bot.send_photo(cid, photo=file_id, caption=photo_caption, parse_mode=None)
             sent += 1
 
         except ApiException as e:
