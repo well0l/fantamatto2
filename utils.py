@@ -21,6 +21,20 @@ def escape_markdown(text):
             escaped_text.append(char)
     return ''.join(escaped_text)
 
+def escape_markdown_v1(text):
+    """Escape dei caratteri speciali per Markdown standard (v1)"""
+    if not text:
+        return ""
+    # Per Markdown v1, solo alcuni caratteri necessitano di escape
+    escape_chars = '_*`['
+    escaped_text = []
+    for char in text:
+        if char in escape_chars:
+            escaped_text.append(f'\\{char}')
+        else:
+            escaped_text.append(char)
+    return ''.join(escaped_text)
+
 def parse_matti_file_content(content):
     """Parsa il contenuto del file matti e restituisce una lista di tuple (nome, punti)"""
     lines = [ln.strip() for ln in content.split('\n') if ln.strip()]
@@ -64,7 +78,7 @@ def cleanup_temp_file(filepath):
         logger.warning(f"Errore nella rimozione del file temporaneo {filepath}: {e}")
 
 def format_username(username=None, first_name=None, chat_id=None):
-    """Formatta il nome utente per la visualizzazione"""
+    """Formatta il nome utente per la visualizzazione (senza escape markdown)"""
     if username:
         return f"@{username}"
     elif first_name:
@@ -73,6 +87,11 @@ def format_username(username=None, first_name=None, chat_id=None):
         return f"ID {chat_id}"
     else:
         return "Utente sconosciuto"
+
+def format_username_safe(username=None, first_name=None, chat_id=None):
+    """Formatta il nome utente per la visualizzazione con escape markdown"""
+    formatted = format_username(username, first_name, chat_id)
+    return escape_markdown_v1(formatted)
 
 def format_user_info(username=None, first_name=None):
     """Formatta le informazioni utente complete"""
@@ -86,7 +105,7 @@ def format_user_info(username=None, first_name=None):
         return "Utente sconosciuto"
 
 def create_leaderboard_text(users, title="🏆 Classifica", show_medals=True, limit=None):
-    """Crea il testo della classifica"""
+    """Crea il testo della classifica con escape markdown corretto"""
     if not users:
         return f"{title}\nLa classifica è vuota!"
     
@@ -102,9 +121,12 @@ def create_leaderboard_text(users, title="🏆 Classifica", show_medals=True, li
     
     for i, row in enumerate(users):
         med = medals[i] if i < len(medals) else "🔹"
-        usr = format_username(row['username'], row['first_name'], row['chat_id'])
+        
+        # Usa la versione safe per evitare problemi con markdown
+        usr = format_username_safe(row['username'], row['first_name'], row['chat_id'])
         pts = row['total_points']
-        text += f"{med} {i+1}. {usr} – *{pts} punti*\n"
+        
+        text += f"{med} {i+1}\\. {usr} – \\*{pts} punti\\*\n"
     
     return text
 
