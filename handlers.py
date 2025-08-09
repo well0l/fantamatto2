@@ -49,9 +49,6 @@ def handle_help(bot, msg: types.Message):
 
 /start - Registrati al bot
 /report - Segnala un matto
-/suggest - Suggerisci un nuovo matto
-/suggest_file - Suggerisci più matti tramite file
-/my_suggestions - Visualizza i tuoi suggerimenti
 /listmatti - Mostra la lista dei matti disponibili
 /classifica - Classifica completa
 /galleria_utente - Visualizza le segnalazioni di un utente
