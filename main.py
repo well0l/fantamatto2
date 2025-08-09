@@ -91,6 +91,11 @@ def cmd_report(msg: types.Message):
 def handler_photo(msg: types.Message):
     handlers.handle_photo(bot, msg)
 
+# ————— NUOVO HANDLER PER I VIDEO —————
+@bot.message_handler(content_types=["video"])
+def handler_video(msg: types.Message):
+    handlers.handle_video(bot, msg)
+
 # ————— REGISTRAZIONE CALLBACK HANDLER —————
 @bot.callback_query_handler(func=lambda call: call.data.startswith("matto|"))
 def callback_matto_handler(call: types.CallbackQuery):
