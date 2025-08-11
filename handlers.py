@@ -53,29 +53,27 @@ def handle_help(bot, msg: types.Message):
 /me - 🏅 La tua posizione in classifica
 
 *📊 CLASSIFICHE E STATISTICHE*
-/leaderboard - 🏆 Top 10 giocatori
 /classifica - 📋 Classifica completa
 
 *🔍 GALLERIE*
-/galleria_utente - 👤 Vedi le segnalazioni di un utente
-/galleria_matto - 🏞️ Vedi tutte le segnalazioni di un matto
+/galleria\_utente - 👤 Vedi le segnalazioni di un utente
+/galleria\_matto - 🏞️ Vedi tutte le segnalazioni di un matto
 /listmatti - 📂 Lista di tutti i matti disponibili
 
 *💡 SUGGERIMENTI*
 /suggest - ✍️ Suggerisci un nuovo matto
-/suggest_file - 📄 Suggerisci più matti tramite file
-/my_suggestions - 📝 I tuoi suggerimenti inviati
+/suggest\_file - 📄 Suggerisci più matti tramite file
+/my\_suggestions - 📝 I tuoi suggerimenti inviati
 
 *❓ AIUTO*
-/help - 📜 Mostra questo messaggio
-/comandi - 📜 Alias per /help
+/comandi - 📜 Mostra questo messaggio
 
 *⚙️ ADMIN* (solo amministratore)
 /admin - 👨‍💼 Gestione utenti e segnalazioni
 /review_suggestions - 💡 Approva/rifiuta suggerimenti
-/add_matto - ➕ Aggiungi un matto manualmente
-/remove_matto - ❌ Rimuovi un matto
-/upload_matti - 📤 Carica matti da file
+/add\_matto - ➕ Aggiungi un matto manualmente
+/remove\_matto - ❌ Rimuovi un matto
+/upload\_matti - 📤 Carica matti da file
 /setpunti - 🔢 Modifica punti di un utente
 
 🎯 *Come giocare:*
