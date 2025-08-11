@@ -653,11 +653,16 @@ def handle_suggestion_points(bot, msg: types.Message):
     user = next((u for u in users if u['chat_id'] == chat_id), None)
     user_info = format_username(user['username'], user['first_name'], user['chat_id']) if user else "Utente sconosciuto"
     
+    # Escape dei caratteri speciali per evitare errori di parsing
+    safe_user_info = escape_markdown_v1(user_info)
+    safe_matto_name = escape_markdown_v1(matto_name)
+    safe_points_text = escape_markdown_v1(points_text)
+    
     admin_text = (
         f"💡 *Nuovo suggerimento matto!*\n\n"
-        f"👤 Da: {user_info}\n"
-        f"📝 Nome: *{matto_name}*\n"
-        f"🎯 Punti: *{points_text}*\n\n"
+        f"👤 Da: {safe_user_info}\n"
+        f"📝 Nome: *{safe_matto_name}*\n"
+        f"🎯 Punti: *{safe_points_text}*\n\n"
         f"Usa /review_suggestions per gestire i suggerimenti."
     )
     
@@ -665,6 +670,18 @@ def handle_suggestion_points(bot, msg: types.Message):
         bot.send_message(ADMIN_CHAT_ID, admin_text, parse_mode="Markdown")
     except Exception as e:
         logger.error(f"Errore notifica admin suggerimento: {str(e)}")
+        # Fallback: invia senza markdown
+        try:
+            fallback_text = (
+                f"💡 Nuovo suggerimento matto!\n\n"
+                f"👤 Da: {user_info}\n"
+                f"📝 Nome: {matto_name}\n"
+                f"🎯 Punti: {points_text}\n\n"
+                f"Usa /review_suggestions per gestire i suggerimenti."
+            )
+            bot.send_message(ADMIN_CHAT_ID, fallback_text, parse_mode=None)
+        except Exception as e2:
+            logger.error(f"Errore anche nel fallback: {str(e2)}")
 
 def handle_suggest_file(bot, msg: types.Message):
     """Inizia il processo di caricamento file con suggerimenti"""
@@ -731,9 +748,12 @@ def handle_suggestion_document(bot, msg: types.Message):
         user = next((u for u in users if u['chat_id'] == chat_id), None)
         user_info = format_username(user['username'], user['first_name'], user['chat_id']) if user else "Utente sconosciuto"
         
+        # Escape dei caratteri speciali
+        safe_user_info = escape_markdown_v1(user_info)
+        
         admin_text = (
             f"💡 *Nuovi suggerimenti matti!*\n\n"
-            f"👤 Da: {user_info}\n"
+            f"👤 Da: {safe_user_info}\n"
             f"📄 {count} matti suggeriti tramite file\n\n"
             f"Usa /review_suggestions per gestire i suggerimenti."
         )
@@ -742,6 +762,17 @@ def handle_suggestion_document(bot, msg: types.Message):
             bot.send_message(ADMIN_CHAT_ID, admin_text, parse_mode="Markdown")
         except Exception as e:
             logger.error(f"Errore notifica admin suggerimenti file: {str(e)}")
+            # Fallback: invia senza markdown
+            try:
+                fallback_text = (
+                    f"💡 Nuovi suggerimenti matti!\n\n"
+                    f"👤 Da: {user_info}\n"
+                    f"📄 {count} matti suggeriti tramite file\n\n"
+                    f"Usa /review_suggestions per gestire i suggerimenti."
+                )
+                bot.send_message(ADMIN_CHAT_ID, fallback_text, parse_mode=None)
+            except Exception as e2:
+                logger.error(f"Errore anche nel fallback: {str(e2)}")
         
     except Exception as e:
         logger.error(f"Errore caricamento suggerimenti: {str(e)}")
