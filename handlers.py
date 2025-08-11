@@ -49,6 +49,9 @@ def handle_help(bot, msg: types.Message):
 
 /start - Registrati al bot
 /report - Segnala un matto
+/suggest - Suggerisci un nuovo matto
+/suggest_file - Suggerisci più matti tramite file
+/my_suggestions - Visualizza i tuoi suggerimenti
 /listmatti - Mostra la lista dei matti disponibili
 /classifica - Classifica completa
 /galleria_utente - Visualizza le segnalazioni di un utente
@@ -477,3 +480,304 @@ def process_media_sighting(bot, msg: types.Message, file_id: str, media_type: st
             logger.error(f"Errore generico invio a {cid}: {str(e)}")
 
     bot.send_message(chat_id, f"✅ Segnalazione inviata a {sent} utenti.", parse_mode=None)
+
+# ————— HANDLER ADMIN SUGGERIMENTI —————
+def handle_review_suggestions(bot, msg: types.Message):
+    """Mostra i suggerimenti in attesa di approvazione (solo admin)"""
+    if msg.chat.id != ADMIN_CHAT_ID:
+        bot.send_message(msg.chat.id, "❌ Comando riservato all'admin!")
+        return
+    
+    suggestions = db_manager.get_pending_suggestions()
+    
+    if not suggestions:
+        bot.send_message(msg.chat.id, "📭 Nessun suggerimento in attesa di approvazione.")
+        return
+    
+    bot.send_message(msg.chat.id, "💡 *Suggerimenti in attesa di approvazione:*", parse_mode="Markdown")
+    
+    for s in suggestions:
+        user_info = format_username(s['username'], s['first_name'], s['user_chat_id'])
+        points_text = f"{s['suggested_points']} punti" if s['suggested_points'] >= 0 else f"{s['suggested_points']} punti (arma)"
+        
+        text = (
+            f"📝 *{s['suggested_name']}* ({points_text})\n"
+            f"👤 Suggerito da: {user_info}\n"
+            f"📅 Data: {s['created_at'][:10]}"
+        )
+        
+        markup = InlineKeyboardMarkup()
+        markup.row(
+            InlineKeyboardButton("✅ Approva", callback_data=f"approve_suggestion|{s['id']}"),
+            InlineKeyboardButton("❌ Rifiuta", callback_data=f"reject_suggestion|{s['id']}")
+        )
+        markup.row(
+            InlineKeyboardButton("✅ Approva senza note", callback_data=f"approve_suggestion_silent|{s['id']}"),
+            InlineKeyboardButton("❌ Rifiuta senza note", callback_data=f"reject_suggestion_silent|{s['id']}")
+        )
+        
+        bot.send_message(msg.chat.id, text, reply_markup=markup, parse_mode="Markdown")
+
+def handle_suggestion_review_notes(bot, msg: types.Message):
+    """Gestisce l'inserimento delle note per la review di un suggerimento"""
+    admin_chat_id = msg.chat.id
+    review_info = state_manager.get_pending_suggestion_review(admin_chat_id)
+    
+    if not review_info:
+        return
+    
+    state_manager.remove_pending_suggestion_review(admin_chat_id)
+    suggestion_id = review_info['suggestion_id']
+    action = review_info['action']
+    notes = msg.text.strip()
+    
+    # Ottieni i dettagli del suggerimento
+    suggestion = db_manager.get_suggestion_by_id(suggestion_id)
+    if not suggestion:
+        bot.send_message(admin_chat_id, "❌ Suggerimento non trovato!")
+        return
+    
+    # Esegui l'azione
+    if action == 'approve':
+        success = db_manager.approve_suggestion(suggestion_id, notes)
+        if success:
+            bot.send_message(
+                admin_chat_id,
+                f"✅ Matto *{suggestion['suggested_name']}* approvato e aggiunto!",
+                parse_mode="Markdown"
+            )
+            
+            # Notifica all'utente
+            user_text = (
+                f"🎉 *Suggerimento approvato!*\n\n"
+                f"📝 Il tuo matto *{suggestion['suggested_name']}* ({suggestion['suggested_points']} punti) è stato aggiunto al gioco!"
+            )
+            if notes:
+                user_text += f"\n\n📝 Note dell'admin: _{notes}_"
+            
+            try:
+                bot.send_message(suggestion['user_chat_id'], user_text, parse_mode="Markdown")
+            except Exception as e:
+                logger.error(f"Errore notifica utente approvazione: {str(e)}")
+        else:
+            bot.send_message(admin_chat_id, "❌ Errore durante l'approvazione!")
+    
+    elif action == 'reject':
+        success = db_manager.reject_suggestion(suggestion_id, notes)
+        if success:
+            bot.send_message(
+                admin_chat_id,
+                f"❌ Suggerimento *{suggestion['suggested_name']}* rifiutato.",
+                parse_mode="Markdown"
+            )
+            
+            # Notifica all'utente
+            user_text = (
+                f"😔 *Suggerimento rifiutato*\n\n"
+                f"📝 Il tuo matto *{suggestion['suggested_name']}* non è stato approvato."
+            )
+            if notes:
+                user_text += f"\n\n📝 Motivo: _{notes}_"
+            
+            try:
+                bot.send_message(suggestion['user_chat_id'], user_text, parse_mode="Markdown")
+            except Exception as e:
+                logger.error(f"Errore notifica utente rifiuto: {str(e)}")
+        else:
+            bot.send_message(admin_chat_id, "❌ Errore durante il rifiuto!")
+
+# ————— HANDLER SUGGERIMENTI —————
+def handle_suggest(bot, msg: types.Message):
+    """Inizia il processo di suggerimento di un nuovo matto"""
+    chat_id = msg.chat.id
+    user_data = db_manager.get_user_rank_and_points(chat_id)
+    
+    if not user_data:
+        bot.send_message(chat_id, "❌ Devi prima registrarti con /start.")
+        return
+    
+    state_manager.set_pending_suggestion_name(chat_id)
+    bot.send_message(
+        chat_id,
+        "💡 *Suggerisci un nuovo matto!*\n\nInvia il nome del matto che vuoi suggerire:",
+        parse_mode="Markdown"
+    )
+
+def handle_suggestion_name(bot, msg: types.Message):
+    """Gestisce l'inserimento del nome del matto suggerito"""
+    chat_id = msg.chat.id
+    matto_name = msg.text.strip()
+    
+    if not matto_name:
+        bot.send_message(chat_id, "❌ Il nome non può essere vuoto. Riprova:")
+        return
+    
+    state_manager.remove_pending_suggestion_name(chat_id)
+    state_manager.set_pending_suggestion_points(chat_id, matto_name)
+    
+    bot.send_message(
+        chat_id,
+        f"📝 Nome scelto: *{matto_name}*\n\nOra invia i punti (numero intero, può essere negativo per le armi):",
+        parse_mode="Markdown"
+    )
+
+def handle_suggestion_points(bot, msg: types.Message):
+    """Gestisce l'inserimento dei punti del matto suggerito"""
+    chat_id = msg.chat.id
+    matto_name = state_manager.get_pending_suggestion_points(chat_id)
+    
+    try:
+        points = int(msg.text.strip())
+    except ValueError:
+        bot.send_message(chat_id, "❌ Inserisci un numero valido:")
+        return
+    
+    state_manager.remove_pending_suggestion_points(chat_id)
+    
+    # Salva il suggerimento nel database
+    suggestion_id = db_manager.add_suggestion(chat_id, matto_name, points)
+    
+    # Notifica all'utente
+    points_text = f"{points} punti" if points >= 0 else f"{points} punti (arma)"
+    bot.send_message(
+        chat_id,
+        f"✅ Suggerimento inviato!\n\n"
+        f"📝 Matto: *{matto_name}*\n"
+        f"🎯 Punti: *{points_text}*\n\n"
+        f"L'admin riceverà la tua proposta per l'approvazione.",
+        parse_mode="Markdown"
+    )
+    
+    # Notifica all'admin
+    users = db_manager.get_registered_users()
+    user = next((u for u in users if u['chat_id'] == chat_id), None)
+    user_info = format_username(user['username'], user['first_name'], user['chat_id']) if user else "Utente sconosciuto"
+    
+    admin_text = (
+        f"💡 *Nuovo suggerimento matto!*\n\n"
+        f"👤 Da: {user_info}\n"
+        f"📝 Nome: *{matto_name}*\n"
+        f"🎯 Punti: *{points_text}*\n\n"
+        f"Usa /review_suggestions per gestire i suggerimenti."
+    )
+    
+    try:
+        bot.send_message(ADMIN_CHAT_ID, admin_text, parse_mode="Markdown")
+    except Exception as e:
+        logger.error(f"Errore notifica admin suggerimento: {str(e)}")
+
+def handle_suggest_file(bot, msg: types.Message):
+    """Inizia il processo di caricamento file con suggerimenti"""
+    chat_id = msg.chat.id
+    user_data = db_manager.get_user_rank_and_points(chat_id)
+    
+    if not user_data:
+        bot.send_message(chat_id, "❌ Devi prima registrarti con /start.")
+        return
+    
+    state_manager.set_suggestion_upload_pending(chat_id, True)
+    bot.send_message(
+        chat_id,
+        "📄 *Suggerisci più matti tramite file!*\n\n"
+        "Invia un file .txt con il formato:\n"
+        "`nome_matto,punti`\n\n"
+        "Esempio:\n"
+        "`pepp u sorrident,-10`\n"
+        "`mario u pazz,5`",
+        parse_mode="Markdown"
+    )
+
+def handle_suggestion_document(bot, msg: types.Message):
+    """Gestisce il caricamento del file con suggerimenti"""
+    chat_id = msg.chat.id
+    
+    if not state_manager.is_suggestion_upload_pending(chat_id):
+        return
+    
+    doc = msg.document
+    if not doc.file_name.lower().endswith(".txt"):
+        bot.send_message(chat_id, "❌ Per favore invia un file di testo .txt.")
+        return
+    
+    try:
+        file_info = bot.get_file(doc.file_id)
+        content = bot.download_file(file_info.file_path).decode("utf-8")
+        
+        # Parsa il contenuto
+        suggestions = parse_matti_file_content(content)
+        
+        if not suggestions:
+            bot.send_message(chat_id, "❌ Nessun suggerimento valido trovato nel file.")
+            state_manager.set_suggestion_upload_pending(chat_id, False)
+            return
+        
+        # Salva tutti i suggerimenti
+        count = 0
+        for name, points in suggestions:
+            db_manager.add_suggestion(chat_id, name, points)
+            count += 1
+        
+        state_manager.set_suggestion_upload_pending(chat_id, False)
+        
+        bot.send_message(
+            chat_id,
+            f"✅ {count} suggerimenti inviati con successo!\n\n"
+            f"L'admin riceverà le tue proposte per l'approvazione.",
+            parse_mode="Markdown"
+        )
+        
+        # Notifica all'admin
+        users = db_manager.get_registered_users()
+        user = next((u for u in users if u['chat_id'] == chat_id), None)
+        user_info = format_username(user['username'], user['first_name'], user['chat_id']) if user else "Utente sconosciuto"
+        
+        admin_text = (
+            f"💡 *Nuovi suggerimenti matti!*\n\n"
+            f"👤 Da: {user_info}\n"
+            f"📄 {count} matti suggeriti tramite file\n\n"
+            f"Usa /review_suggestions per gestire i suggerimenti."
+        )
+        
+        try:
+            bot.send_message(ADMIN_CHAT_ID, admin_text, parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"Errore notifica admin suggerimenti file: {str(e)}")
+        
+    except Exception as e:
+        logger.error(f"Errore caricamento suggerimenti: {str(e)}")
+        bot.send_message(chat_id, f"❌ Errore durante il caricamento: {str(e)}")
+        state_manager.set_suggestion_upload_pending(chat_id, False)
+
+def handle_my_suggestions(bot, msg: types.Message):
+    """Mostra i suggerimenti dell'utente"""
+    chat_id = msg.chat.id
+    user_data = db_manager.get_user_rank_and_points(chat_id)
+    
+    if not user_data:
+        bot.send_message(chat_id, "❌ Devi prima registrarti con /start.")
+        return
+    
+    suggestions = db_manager.get_user_suggestions(chat_id)
+    
+    if not suggestions:
+        bot.send_message(chat_id, "📭 Non hai ancora fatto suggerimenti.")
+        return
+    
+    text = "💡 *I tuoi suggerimenti:*\n\n"
+    
+    for s in suggestions:
+        status_emoji = {
+            'pending': '⏳',
+            'approved': '✅',
+            'rejected': '❌'
+        }.get(s['status'], '❓')
+        
+        points_text = f"{s['suggested_points']} punti" if s['suggested_points'] >= 0 else f"{s['suggested_points']} punti (arma)"
+        text += f"{status_emoji} *{s['suggested_name']}* ({points_text})\n"
+        
+        if s['status'] != 'pending' and s['admin_notes']:
+            text += f"   📝 Note admin: _{s['admin_notes']}_\n"
+        
+        text += "\n"
+    
+    bot.send_message(chat_id, text, parse_mode="Markdown")
