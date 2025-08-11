@@ -45,19 +45,45 @@ def handle_start(bot, msg: types.Message):
 
 def handle_help(bot, msg: types.Message):
     help_text = """
-📜 *Lista comandi disponibili:*
+🤖 *FantaMatto Bot - Lista Comandi*
 
-/start - Registrati al bot
-/report - Segnala un matto
-/suggest - Suggerisci un nuovo matto
-/suggest_file - Suggerisci più matti tramite file
-/my_suggestions - Visualizza i tuoi suggerimenti
-/listmatti - Mostra la lista dei matti disponibili
-/classifica - Classifica completa
-/galleria_utente - Visualizza le segnalazioni di un utente
-/galleria_matto - Visualizza tutte le segnalazioni di un matto
-/me - Mostra la tua posizione in classifica
+*🎮 COMANDI PRINCIPALI*
+/start - Registrati al gioco
+/report - 📸 Segnala un matto avvistato
+/me - 🏅 La tua posizione in classifica
 
+*📊 CLASSIFICHE E STATISTICHE*
+/leaderboard - 🏆 Top 10 giocatori
+/classifica - 📋 Classifica completa
+
+*🔍 GALLERIE*
+/galleria_utente - 👤 Vedi le segnalazioni di un utente
+/galleria_matto - 🏞️ Vedi tutte le segnalazioni di un matto
+/listmatti - 📂 Lista di tutti i matti disponibili
+
+*💡 SUGGERIMENTI*
+/suggest - ✍️ Suggerisci un nuovo matto
+/suggest_file - 📄 Suggerisci più matti tramite file
+/my_suggestions - 📝 I tuoi suggerimenti inviati
+
+*❓ AIUTO*
+/help - 📜 Mostra questo messaggio
+/comandi - 📜 Alias per /help
+
+*⚙️ ADMIN* (solo amministratore)
+/admin - 👨‍💼 Gestione utenti e segnalazioni
+/review_suggestions - 💡 Approva/rifiuta suggerimenti
+/add_matto - ➕ Aggiungi un matto manualmente
+/remove_matto - ❌ Rimuovi un matto
+/upload_matti - 📤 Carica matti da file
+/setpunti - 🔢 Modifica punti di un utente
+
+🎯 *Come giocare:*
+1️⃣ Registrati con /start
+2️⃣ Trova un "matto" nella vita reale
+3️⃣ Usa /report per segnalarlo
+4️⃣ Invia la foto/video come prova
+5️⃣ Guadagna punti e scala la classifica! 🏆
 """
     bot.send_message(msg.chat.id, help_text, parse_mode="Markdown")
 
