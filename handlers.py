@@ -831,7 +831,7 @@ def handle_my_suggestions(bot, msg: types.Message):
         text += f"{status_emoji} *{s['suggested_name']}* ({points_text})\n"
         
         if s['status'] != 'pending' and s['admin_notes']:
-            text += f"   📝 Note admin: _{s['admin_notes']}_\n"
+            text += f""
         
         text += "\n"
     
