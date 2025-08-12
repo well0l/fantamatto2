@@ -53,27 +53,29 @@ def handle_help(bot, msg: types.Message):
 /me - 🏅 La tua posizione in classifica
 
 *📊 CLASSIFICHE E STATISTICHE*
+/leaderboard - 🏆 Top 10 giocatori
 /classifica - 📋 Classifica completa
 
 *🔍 GALLERIE*
-/galleria\_utente - 👤 Vedi le segnalazioni di un utente
-/galleria\_matto - 🏞️ Vedi tutte le segnalazioni di un matto
+/galleria_utente - 👤 Vedi le segnalazioni di un utente
+/galleria_matto - 🏞️ Vedi tutte le segnalazioni di un matto
 /listmatti - 📂 Lista di tutti i matti disponibili
 
 *💡 SUGGERIMENTI*
 /suggest - ✍️ Suggerisci un nuovo matto
-/suggest\_file - 📄 Suggerisci più matti tramite file
-/my\_suggestions - 📝 I tuoi suggerimenti inviati
+/suggest_file - 📄 Suggerisci più matti tramite file
+/my_suggestions - 📝 I tuoi suggerimenti inviati
 
 *❓ AIUTO*
-/comandi - 📜 Mostra questo messaggio
+/help - 📜 Mostra questo messaggio
+/comandi - 📜 Alias per /help
 
 *⚙️ ADMIN* (solo amministratore)
 /admin - 👨‍💼 Gestione utenti e segnalazioni
 /review_suggestions - 💡 Approva/rifiuta suggerimenti
-/add\_matto - ➕ Aggiungi un matto manualmente
-/remove\_matto - ❌ Rimuovi un matto
-/upload\_matti - 📤 Carica matti da file
+/add_matto - ➕ Aggiungi un matto manualmente
+/remove_matto - ❌ Rimuovi un matto
+/upload_matti - 📤 Carica matti da file
 /setpunti - 🔢 Modifica punti di un utente
 
 🎯 *Come giocare:*
@@ -524,9 +526,14 @@ def handle_review_suggestions(bot, msg: types.Message):
         user_info = format_username(s['username'], s['first_name'], s['user_chat_id'])
         points_text = f"{s['suggested_points']} punti" if s['suggested_points'] >= 0 else f"{s['suggested_points']} punti (arma)"
         
+        # Escape dei caratteri speciali per evitare errori di parsing
+        safe_user_info = escape_markdown_v1(user_info)
+        safe_matto_name = escape_markdown_v1(s['suggested_name'])
+        safe_points_text = escape_markdown_v1(points_text)
+        
         text = (
-            f"📝 *{s['suggested_name']}* ({points_text})\n"
-            f"👤 Suggerito da: {user_info}\n"
+            f"📝 *{safe_matto_name}* ({safe_points_text})\n"
+            f"👤 Suggerito da: {safe_user_info}\n"
             f"📅 Data: {s['created_at'][:10]}"
         )
         
@@ -540,7 +547,20 @@ def handle_review_suggestions(bot, msg: types.Message):
             InlineKeyboardButton("❌ Rifiuta senza note", callback_data=f"reject_suggestion_silent|{s['id']}")
         )
         
-        bot.send_message(msg.chat.id, text, reply_markup=markup, parse_mode="Markdown")
+        try:
+            bot.send_message(msg.chat.id, text, reply_markup=markup, parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"Errore invio suggerimento con Markdown: {str(e)}")
+            # Fallback: invia senza markdown
+            try:
+                fallback_text = (
+                    f"📝 {s['suggested_name']} ({points_text})\n"
+                    f"👤 Suggerito da: {user_info}\n"
+                    f"📅 Data: {s['created_at'][:10]}"
+                )
+                bot.send_message(msg.chat.id, fallback_text, reply_markup=markup, parse_mode=None)
+            except Exception as e2:
+                logger.error(f"Errore anche nel fallback review: {str(e2)}")
 
 def handle_suggestion_review_notes(bot, msg: types.Message):
     """Gestisce l'inserimento delle note per la review di un suggerimento"""
@@ -831,7 +851,7 @@ def handle_my_suggestions(bot, msg: types.Message):
         text += f"{status_emoji} *{s['suggested_name']}* ({points_text})\n"
         
         if s['status'] != 'pending' and s['admin_notes']:
-            text += f""
+            text += f"   📝 Note admin: _{s['admin_notes']}_\n"
         
         text += "\n"
     
